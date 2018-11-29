@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:int-http="http://www.springframework.org/schema/integration/http"
+	xsi:schemaLocation="
+    http://www.springframework.org/schema/beans
+    http://www.springframework.org/schema/beans/spring-beans.xsd
+    http://www.springframework.org/schema/integration
+    http://www.springframework.org/schema/integration/spring-integration.xsd
+    http://www.springframework.org/schema/integration/http
+    http://www.springframework.org/schema/integration/http/spring-integration-http.xsd">
+ 
+	<!--Creating message channels -->
+	<int:channel id="requestChannel" />
+	<int:channel id="contentTransformer" />
+	<int:channel id="structuralTransformer" />
+	<int:channel id="outputChannel" />
+	<int:channel id="outBoundGateway" />
+	<int:channel id="postChannel" />
+	<int:channel id="postChannel2" />
+	<int:channel id="getScoreIn"/>
+	<int:channel id="getScoreOut"/>
+	<int:channel id="verifyIn"/>
+	<int:channel id="verifyOut"/>
+	<int:channel id="getCreditScore"/>
+	
+	<!--Intercept client request -->
+	<int-http:inbound-gateway request-channel="requestChannel"
+		reply-channel="outputChannel" supported-methods="GET"
+		path="/userDetail/{userName}">
+    
+		<int-http:request-mapping consumes="application/json" produces="application/json" />
+		<int-http:header name="userName" expression="#pathVariables.userName"/>
+	</int-http:inbound-gateway>
+	
+	<int-http:inbound-gateway request-channel="postChannel"
+		reply-channel="outputChannel" supported-methods="POST"
+		path="/saveUserDetail">
+    
+		<int-http:request-mapping consumes="application/json" produces="application/json" />		
+	</int-http:inbound-gateway>
+	
+	<int-http:inbound-gateway request-channel="getScore"
+		reply-channel="getScoreOut" supported-methods="GET"
+		path="/getCreditScore/{userName}">
+    
+		<int-http:request-mapping consumes="application/json" produces="application/json" />
+		<int-http:header name="userName" expression="#pathVariables.userName"/>
+	</int-http:inbound-gateway>
+	
+	<!--Call external api -->
+	<int-http:outbound-gateway request-channel="requestChannel" reply-channel="contentTransformer"
+			url="http://localhost:8090/getUserDetail/{userName}"
+			http-method="GET"
+			expected-response-type="com.spring.msg.UserDetail">
+			<int-http:uri-variable name="userName" expression="headers.userName"/>
+			</int-http:outbound-gateway>
+			
+	<int-http:outbound-gateway request-channel="postChannel" reply-channel="postChannel2"
+			url="http://localhost:8090/saveUserDetail"
+			http-method="POST"
+			expected-response-type="com.spring.msg.Response"
+			extract-request-payload="true"/>
+					
+	<int-http:outbound-gateway request-channel="getScore" reply-channel="verifyIn"
+			url="http://localhost:8090/getUserDetail/{userName}"
+			http-method="GET"
+			expected-response-type="com.spring.msg.UserDetail">
+			<int-http:uri-variable name="userName" expression="headers.userName"/>
+			</int-http:outbound-gateway>
+			
+		<int-http:outbound-gateway request-channel="verifyIn" reply-channel="verifyOut"
+			url="http://localhost:8091/verify"
+			http-method="POST"
+			expected-response-type="com.spring.msg.UserDetail"
+			extract-request-payload="true"/>
+		<int-http:outbound-gateway request-channel="getCreditScore" reply-channel="getScoreOut"
+			url="http://localhost:8092/getCreditCScore"
+			http-method="POST"
+			expected-response-type="com.spring.msg.CreditScoreResponse"
+			extract-request-payload="true"/>	
+	<!--Routers -->	
+	<int:router input-channel="verifyOut" default-output-channel="getScoreOut"
+		expression="payload.identityVerified" >
+		<int:mapping  value="true" channel="creditScoreRequestTransformer"/>
+		<int:mapping value="false" channel="getScoreOut"/>
+		</int:router>						
+	<!--Custom transformer -->	
+	<int:transformer input-channel="contentTransformer" output-channel="structuralTransformer"
+		ref="messageTransformer" method="transformResponse"/>
+		
+	<int:transformer input-channel="creditScoreRequestTransformer" output-channel="getCreditScore"
+		ref="messageTransformer" method="transformRequest"/>
+			
+	<!--Out of the box transformer -->	
+ 	<int:object-to-map-transformer input-channel="structuralTransformer" output-channel="outputChannel"/>
+ 	
+ 	<!--Service activator -->	
+ 	<int:service-activator ref="serviceEndpoint"
+		method="get" input-channel="postChannel2" output-channel="outputChannel" />	
+</beans>
